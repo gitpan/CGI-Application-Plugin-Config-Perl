@@ -1,0 +1,5 @@
+Revision history for Perl extension CGI::Application::Plugin::Config::Perl
+
+1.40 Fri Apr  2 09:28:31 EDT 2010
+    Initial release, forked from CGI::Application::Plugin::ConfigAuto 1.32
+
