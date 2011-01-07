@@ -1,5 +1,17 @@
 Revision history for Perl extension CGI::Application::Plugin::Config::Perl
 
+1.50 Thu Jan  6 16:50:55 EST 2011
+
+    [FEATURES]
+    Allow cfg_files() to be called as class method. This causes
+    the config file be re-used across multiple requests in a persistent
+    environment.
+
+    This is the recommended usage now to improve performance.
+
+    Thanks to Cees Hek and CGI::Application::Plugin::TT for inspiration
+    on implementing this feature.
+
 1.40 Fri Apr  2 09:28:31 EDT 2010
     Initial release, forked from CGI::Application::Plugin::ConfigAuto 1.32
 

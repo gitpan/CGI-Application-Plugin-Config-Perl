@@ -6,6 +6,7 @@ MANIFEST
 META.yml
 README
 t/basic.t
+t/class_method.t
 t/empty.t
 t/pod.t
 t/TestAppBasic.pm

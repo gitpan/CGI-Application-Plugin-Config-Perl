@@ -7,8 +7,15 @@ SYNOPSIS
 
     In your instance script:
 
+     # In a persistent environment, a class method call keeps the config file
+     # from being re-read on every request
+      WebApp->cfg_file('config.pl');
+      WebApp->new( ... as usual ... );
+
+     # The older syntax of passing files in the call to new() still works.
+     # Note that it results in the config file being re-read in a persistent
+     # environment on later requests.
      my $app = WebApp->new(PARAMS => { cfg_file => 'config.pl' });
-     $app->run();
 
     In your application module:
 
@@ -109,6 +116,7 @@ METHODS
 
   cfg_file()
      $self->cfg_file('my_config_file.pl');
+     WebApp->cfg_file('my_config_file.pl');
 
     Supply an array of config files, and they will be processed in order.
 

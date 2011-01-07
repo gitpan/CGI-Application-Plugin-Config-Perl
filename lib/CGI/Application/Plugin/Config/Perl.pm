@@ -23,7 +23,7 @@ sub import {
 }
 
 
-our $VERSION = '1.40';
+our $VERSION = '1.50';
 
 # required by C::A::Standard::Config;
 sub std_config { return 1; }
@@ -40,8 +40,16 @@ CGI::Application::Plugin::Config::Perl - Pure Perl config file management for CG
 
 In your instance script:
 
+ # In a persistent environment, a class method call keeps the config file
+ # from being re-read on every request
+  WebApp->cfg_file('config.pl');
+  WebApp->new( ... as usual ... );
+
+ # The older syntax of passing files in the call to new() still works.
+ # Note that it results in the config file being re-read in a persistent
+ # environment on later requests.
  my $app = WebApp->new(PARAMS => { cfg_file => 'config.pl' });
- $app->run();
+
 
 In your application module:
 
@@ -161,28 +169,32 @@ for developers. Users can ignore it.
 sub cfg {
     my $self = shift;
 
-    if (!$self->{__CFG}) {
-         unless ($self->{__CFG_FILES}) {
-             my @all_cfg_files;
-             for my $key (qw/cfg_file config_files/) {
-                 my $cfg_file = $self->param($key);
-                 if (defined $cfg_file) {
-                     push @all_cfg_files, @$cfg_file  if (ref $cfg_file eq 'ARRAY');
-                     push @all_cfg_files,  $cfg_file  if (ref \$cfg_file eq 'SCALAR');
-                 }
-             }
+    my $cfg = _get_cfg_hash($self);
 
-             # Non-standard call syntax for mix-in happiness.
-             cfg_file($self,@all_cfg_files);
-         }
+    my $field = shift;
+    return $cfg->{$field} if $field;
+    if (ref $cfg) {
+        return wantarray ? %$cfg : $cfg;
+    }
+}
+
+sub _get_cfg_hash {
+    my $self = shift;
+
+    return $self->{__CFG} if $self->{__CFG};
+
+    my ($href, $files_aref, $frompkg) = _get_cfg_hash_or_files($self);
+    return $href if $href;
+
+    if (!$href) {
 
         # Read in config files in the order the appear in this array.
         my %combined_cfg;
-        for (my $i = 0; $i < scalar @{ $self->{__CFG_FILES} }; $i++) {
-            my $file = $self->{__CFG_FILES}[$i];
+        for (my $i = 0; $i < scalar @$files_aref; $i++) {
+            my $file = $files_aref->[$i];
             my %parms;
-            if (ref $self->{__CFG_FILES}[$i+1] eq 'HASH') {
-                %parms = %{ $self->{__CFG_FILES}[$i+1] };
+            if (ref $files_aref->[$i+1] eq 'HASH') {
+                %parms = %{ $files_aref->[$i+1] };
                 # skip trying to process the hashref as a file name
                 $i++;
             }
@@ -196,20 +208,17 @@ sub cfg {
         die "No configuration found. Check your config file(s) including their syntax."
             unless keys %combined_cfg;
 
-        $self->{__CFG} = \%combined_cfg;
+        _set_hash($self,\%combined_cfg,$frompkg);
+        return \%combined_cfg;
     }
 
-    my $cfg = $self->{__CFG};
-    my $field = shift;
-    return $cfg->{$field} if $field;
-    if (ref $cfg) {
-        return wantarray ? %$cfg : $cfg;
-    }
 }
+
 
 =head2 cfg_file()
 
  $self->cfg_file('my_config_file.pl');
+ WebApp->cfg_file('my_config_file.pl');
 
 Supply an array of config files, and they will be processed in order.
 
@@ -217,9 +226,75 @@ Supply an array of config files, and they will be processed in order.
 
 sub cfg_file {
     my $self = shift;
+    my $class = ref $self ? ref $self : $self;
+
     my @cfg_files = @_;
     unless (scalar @cfg_files) { croak "cfg_file: must have at least one config file." }
-    $self->{__CFG_FILES} = \@cfg_files;
+
+    # Object case
+    if (ref $self) {
+        $self->{__CFG_FILES} = \@cfg_files;
+    } 
+    # Class case
+    else {
+        no strict 'refs';
+        ${$class.'::__CFG_FILES'} = \@cfg_files;
+    }
+
+
+}
+
+
+sub _set_hash {
+    my $self  = shift;
+    my $href  = shift;
+    my $class = shift;
+
+    no strict 'refs';
+    ${$class.'::__CFG'} = $href if $class;
+
+    # Whether we store the data in the class or not,
+    # cache it in the object for performance.
+    $self->{__CFG} = $href;
+}
+
+
+# Get the config files from the object or a parent class.
+# Alias it into the object if it's not already there for fast look-ups next time.
+sub _get_cfg_hash_or_files {
+    my $self = shift;
+
+    # Handle the simple case by looking in the object first
+    # If the config files has not been declared already, do so and store it in the object. 
+    unless ($self->{__CFG_FILES}) {
+        my @all_cfg_files;
+        for my $key (qw/cfg_file config_files/) {
+            my $cfg_file = $self->param($key);
+            if (defined $cfg_file) {
+                push @all_cfg_files, @$cfg_file  if (ref $cfg_file eq 'ARRAY');
+                push @all_cfg_files,  $cfg_file  if (ref \$cfg_file eq 'SCALAR');
+            }
+        }
+        # Non-standard call syntax for mix-in happiness.
+        # Sets __CFG_FILES;
+        cfg_file($self,@all_cfg_files) if scalar @all_cfg_files;
+    }
+
+    return (undef,$self->{__CFG_FILES}) if $self->{__CFG_FILES};
+
+    # See if we can find them in the class hierarchy
+    #  We look at each of the modules in the @ISA tree, and
+    #  their parents as well until we find either a tt
+    #  object or a set of configuration parameters
+    require Class::ISA;
+    my $class = ref $self;
+    for my $super ($class, Class::ISA::super_path($class)) {
+        no strict 'refs';
+        return (${$super.'::__CFG'}, ${$super.'::__CFG_FILES'}, $super) if ${$super.'::__CFG'};
+        return (undef, ${$super.'::__CFG_FILES'}, $super) if ${$super.'::__CFG_FILES'};
+    }
+    # No luck.
+    die "no config files found"
 }
 
 
